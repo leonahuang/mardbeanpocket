@@ -263,6 +263,127 @@ function downloadCanvas(canvas: HTMLCanvasElement, filename: string): void {
   link.click();
 }
 
+function isMobileDevice(): boolean {
+  if (typeof window === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  const mobileUa =
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+  const hasTouch =
+    "ontouchstart" in window || (navigator.maxTouchPoints ?? 0) > 0;
+  const narrowViewport = window.matchMedia("(max-width: 768px)").matches;
+  return mobileUa || (hasTouch && narrowViewport);
+}
+
+function canvasToPngFile(
+  canvas: HTMLCanvasElement,
+  filename: string
+): Promise<File> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Failed to export PNG"));
+          return;
+        }
+        resolve(new File([blob], filename, { type: "image/png" }));
+      },
+      "image/png",
+      1
+    );
+  });
+}
+
+async function sharePatternImage(file: File): Promise<"shared" | "unsupported" | "cancelled"> {
+  if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
+    return "unsupported";
+  }
+
+  const shareData: ShareData = {
+    files: [file],
+    title: "MARD BEAN POCKET Pattern",
+  };
+
+  try {
+    if (typeof navigator.canShare === "function" && !navigator.canShare(shareData)) {
+      return "unsupported";
+    }
+    await navigator.share(shareData);
+    return "shared";
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      return "cancelled";
+    }
+    return "unsupported";
+  }
+}
+
+function MobileSavePatternModal({
+  imageSrc,
+  onClose,
+}: {
+  imageSrc: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Save MARD BEAN POCKET pattern"
+    >
+      <div
+        className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-3 top-3 z-10 rounded-lg px-2 py-1 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
+        >
+          关闭
+        </button>
+
+        <div className="border-b border-slate-100 px-4 pb-3 pt-5">
+          <p className="text-center text-sm font-bold tracking-wide text-slate-800">
+            MARD BEAN POCKET
+          </p>
+          <p className="mt-0.5 text-center text-xs text-slate-500">
+            拼豆教程生成器
+          </p>
+        </div>
+
+        <div className="overflow-auto bg-slate-50 p-4">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={imageSrc}
+            alt="MARD bead pattern chart"
+            className="mx-auto block max-w-full rounded-lg border border-slate-200 bg-white shadow-sm"
+            style={{ imageRendering: "pixelated" }}
+          />
+        </div>
+
+        <p className="border-t border-slate-100 px-4 py-4 text-center text-sm leading-relaxed text-slate-600">
+          💡 提示：长按图片选择「保存到相册」即可开始制作！
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ─── Sub-components (defined before default export for stable bundling) ───────
 
 function ColorSwatchButton({
@@ -790,6 +911,9 @@ export default function BeadPatternGenerator() {
     null
   );
   const [hueValue, setHueValue] = useState(30);
+  const [mobileSaveModalSrc, setMobileSaveModalSrc] = useState<string | null>(
+    null
+  );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -914,12 +1038,28 @@ export default function BeadPatternGenerator() {
     }
   }, [imageElement, gridSize, resetSwapState]);
 
-  const handleDownload = useCallback(() => {
+  const handleDownload = useCallback(async () => {
     if (!pixelMatrix) return;
+
     const cellSize = gridSize <= 16 ? 32 : gridSize <= 29 ? 24 : 16;
     const labelSize = 28;
+    const filename = `mard-bead-pattern-${gridSize}x${gridSize}.png`;
     const canvas = drawPatternToCanvas(pixelMatrix, cellSize, labelSize);
-    downloadCanvas(canvas, `mard-bead-pattern-${gridSize}x${gridSize}.png`);
+
+    if (!isMobileDevice()) {
+      downloadCanvas(canvas, filename);
+      return;
+    }
+
+    try {
+      const file = await canvasToPngFile(canvas, filename);
+      const shareResult = await sharePatternImage(file);
+      if (shareResult === "shared" || shareResult === "cancelled") return;
+    } catch (error) {
+      console.warn("Mobile share unavailable, opening save modal:", error);
+    }
+
+    setMobileSaveModalSrc(canvas.toDataURL("image/png"));
   }, [pixelMatrix, gridSize]);
 
   useEffect(() => {
@@ -1286,6 +1426,13 @@ export default function BeadPatternGenerator() {
           </section>
         </div>
       </main>
+
+      {mobileSaveModalSrc && (
+        <MobileSavePatternModal
+          imageSrc={mobileSaveModalSrc}
+          onClose={() => setMobileSaveModalSrc(null)}
+        />
+      )}
     </div>
   );
 }
