@@ -8,6 +8,7 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
+  type ReactNode,
 } from "react";
 import {
   Download,
@@ -169,6 +170,27 @@ function countBeads(matrix: PixelMatrix): Record<string, number> {
   return counts;
 }
 
+function applyMatrixFlip(
+  matrix: PixelMatrix,
+  flipH: boolean,
+  flipV: boolean
+): PixelMatrix {
+  if (!matrix?.length || (!flipH && !flipV)) return matrix;
+
+  let result = matrix.map((row) => [...(row ?? [])]);
+  if (flipH) {
+    result = result.map((row) => [...row].reverse());
+  }
+  if (flipV) {
+    result = [...result].reverse();
+  }
+  return result;
+}
+
+function getAxisLabel(index: number, size: number, flipped: boolean): number {
+  return flipped ? size - index : index + 1;
+}
+
 function pixelateImage(image: HTMLImageElement, gridSize: number): PixelMatrix {
   if (gridSize <= 0 || !image.naturalWidth || !image.naturalHeight) return [];
   try {
@@ -198,7 +220,13 @@ function pixelateImage(image: HTMLImageElement, gridSize: number): PixelMatrix {
   }
 }
 
-function drawPatternToCanvas(matrix: PixelMatrix, cellSize: number, labelSize: number): HTMLCanvasElement {
+function drawPatternToCanvas(
+  matrix: PixelMatrix,
+  cellSize: number,
+  labelSize: number,
+  isFlippedH = false,
+  isFlippedV = false
+): HTMLCanvasElement {
   const gridSize = matrix.length;
   const patternSize = gridSize * cellSize;
   const canvas = document.createElement("canvas");
@@ -215,13 +243,15 @@ function drawPatternToCanvas(matrix: PixelMatrix, cellSize: number, labelSize: n
   ctx.textBaseline = "middle";
   for (let col = 0; col < gridSize; col++) {
     const x = offset + col * cellSize + cellSize / 2;
-    ctx.fillText(String(col + 1), x, labelSize / 2);
-    ctx.fillText(String(col + 1), x, canvas.height - labelSize / 2);
+    const colLabel = getAxisLabel(col, gridSize, isFlippedH);
+    ctx.fillText(String(colLabel), x, labelSize / 2);
+    ctx.fillText(String(colLabel), x, canvas.height - labelSize / 2);
   }
   for (let row = 0; row < gridSize; row++) {
     const y = offset + row * cellSize + cellSize / 2;
-    ctx.fillText(String(row + 1), labelSize / 2, y);
-    ctx.fillText(String(row + 1), canvas.width - labelSize / 2, y);
+    const rowLabel = getAxisLabel(row, gridSize, isFlippedV);
+    ctx.fillText(String(rowLabel), labelSize / 2, y);
+    ctx.fillText(String(rowLabel), canvas.width - labelSize / 2, y);
   }
   ctx.font = `bold ${Math.max(6, cellSize * 0.28)}px monospace`;
   for (let row = 0; row < gridSize; row++) {
@@ -380,6 +410,22 @@ function MobileSavePatternModal({
           💡 提示：长按图片选择「保存到相册」即可开始制作！
         </p>
       </div>
+    </div>
+  );
+}
+
+function ChartScrollViewport({
+  children,
+  className = "",
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`w-full min-w-0 max-w-full overflow-x-auto overflow-y-auto overscroll-x-contain overscroll-y-contain scroll-smooth px-4 py-4 [touch-action:pan-x_pan-y] [-webkit-overflow-scrolling:touch] ${className}`}
+    >
+      <div className="w-max min-w-min">{children}</div>
     </div>
   );
 }
@@ -714,7 +760,7 @@ function PhysicalSizePreview({
   const cmHigh = formatPhysicalCm(gridSize);
 
   return (
-    <div className="flex w-full flex-col items-center">
+    <div className="w-max min-w-min">
       <p className="mb-5 text-center text-sm font-bold text-slate-800">
         Estimated Finished Size:{" "}
         <span className="text-amber-700">
@@ -769,9 +815,13 @@ function PhysicalSizePreview({
 function PatternGrid({
   matrix,
   cellSize,
+  isFlippedH = false,
+  isFlippedV = false,
 }: {
   matrix: PixelMatrix;
   cellSize: number;
+  isFlippedH?: boolean;
+  isFlippedV?: boolean;
 }) {
   if (!matrix?.length) return null;
 
@@ -781,7 +831,7 @@ function PatternGrid({
   const totalWidth = patternWidth + labelWidth * 2;
 
   return (
-    <div className="inline-block select-none" style={{ width: totalWidth }}>
+    <div className="inline-block w-max min-w-min select-none" style={{ width: totalWidth }}>
       <div className="flex" style={{ marginLeft: labelWidth }}>
         {Array.from({ length: gridSize }, (_, col) => (
           <div
@@ -789,7 +839,7 @@ function PatternGrid({
             className="flex items-center justify-center text-[10px] font-bold text-stone-500"
             style={{ width: cellSize, height: labelWidth }}
           >
-            {col + 1}
+            {getAxisLabel(col, gridSize, isFlippedH)}
           </div>
         ))}
       </div>
@@ -802,7 +852,7 @@ function PatternGrid({
               className="flex items-center justify-center text-[10px] font-bold text-stone-500"
               style={{ height: cellSize }}
             >
-              {row + 1}
+              {getAxisLabel(row, gridSize, isFlippedV)}
             </div>
           ))}
         </div>
@@ -870,7 +920,7 @@ function PatternGrid({
               className="flex items-center justify-center text-[10px] font-bold text-stone-500"
               style={{ height: cellSize }}
             >
-              {row + 1}
+              {getAxisLabel(row, gridSize, isFlippedV)}
             </div>
           ))}
         </div>
@@ -883,7 +933,7 @@ function PatternGrid({
             className="flex items-center justify-center text-[10px] font-bold text-stone-500"
             style={{ width: cellSize, height: labelWidth }}
           >
-            {col + 1}
+            {getAxisLabel(col, gridSize, isFlippedH)}
           </div>
         ))}
       </div>
@@ -911,11 +961,21 @@ export default function BeadPatternGenerator() {
     null
   );
   const [hueValue, setHueValue] = useState(30);
+  const [isFlippedH, setIsFlippedH] = useState(false);
+  const [isFlippedV, setIsFlippedV] = useState(false);
   const [mobileSaveModalSrc, setMobileSaveModalSrc] = useState<string | null>(
     null
   );
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const displayMatrix = useMemo(
+    () =>
+      pixelMatrix
+        ? applyMatrixFlip(pixelMatrix, isFlippedH, isFlippedV)
+        : null,
+    [pixelMatrix, isFlippedH, isFlippedV]
+  );
 
   const beadCounts = useMemo(
     () => (pixelMatrix ? countBeads(pixelMatrix) : {}),
@@ -979,6 +1039,11 @@ export default function BeadPatternGenerator() {
     setActiveCategory(null);
   }, []);
 
+  const resetFlipState = useCallback(() => {
+    setIsFlippedH(false);
+    setIsFlippedV(false);
+  }, []);
+
   const resetSwapState = useCallback(() => {
     setActiveColorId(null);
     setColorFilterMode("similar");
@@ -998,12 +1063,13 @@ export default function BeadPatternGenerator() {
           setPixelMatrix(null);
           setHasGenerated(false);
           resetSwapState();
+          resetFlipState();
         };
         img.src = src;
       };
       reader.readAsDataURL(file);
     },
-    [resetSwapState]
+    [resetSwapState, resetFlipState]
   );
 
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
@@ -1039,12 +1105,18 @@ export default function BeadPatternGenerator() {
   }, [imageElement, gridSize, resetSwapState]);
 
   const handleDownload = useCallback(async () => {
-    if (!pixelMatrix) return;
+    if (!displayMatrix) return;
 
     const cellSize = gridSize <= 16 ? 32 : gridSize <= 29 ? 24 : 16;
     const labelSize = 28;
     const filename = `mard-bead-pattern-${gridSize}x${gridSize}.png`;
-    const canvas = drawPatternToCanvas(pixelMatrix, cellSize, labelSize);
+    const canvas = drawPatternToCanvas(
+      displayMatrix,
+      cellSize,
+      labelSize,
+      isFlippedH,
+      isFlippedV
+    );
 
     if (!isMobileDevice()) {
       downloadCanvas(canvas, filename);
@@ -1060,7 +1132,7 @@ export default function BeadPatternGenerator() {
     }
 
     setMobileSaveModalSrc(canvas.toDataURL("image/png"));
-  }, [pixelMatrix, gridSize]);
+  }, [displayMatrix, gridSize, isFlippedH, isFlippedV]);
 
   useEffect(() => {
     if (hasGenerated && imageElement) {
@@ -1088,6 +1160,7 @@ export default function BeadPatternGenerator() {
     setPixelMatrix(null);
     setHasGenerated(false);
     resetSwapState();
+    resetFlipState();
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -1236,6 +1309,38 @@ export default function BeadPatternGenerator() {
                 </div>
               </div>
 
+              <div>
+                <label className="mb-2 block text-sm font-semibold text-stone-700">
+                  Matrix Flip
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    disabled={!pixelMatrix}
+                    onClick={() => setIsFlippedH((prev) => !prev)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isFlippedH
+                        ? "border-amber-500 bg-amber-50 text-amber-700 shadow-sm"
+                        : "border-stone-200 bg-stone-50 text-stone-600 hover:border-amber-300 hover:bg-amber-50/60"
+                    }`}
+                  >
+                    ↔️ 左右反转
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!pixelMatrix}
+                    onClick={() => setIsFlippedV((prev) => !prev)}
+                    className={`rounded-lg border px-2 py-2 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                      isFlippedV
+                        ? "border-amber-500 bg-amber-50 text-amber-700 shadow-sm"
+                        : "border-stone-200 bg-stone-50 text-stone-600 hover:border-amber-300 hover:bg-amber-50/60"
+                    }`}
+                  >
+                    ↕️ 上下反转
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-2 pt-1">
                 <button
                   type="button"
@@ -1320,12 +1425,12 @@ export default function BeadPatternGenerator() {
                   {(previewMode === "pattern" ||
                     previewMode === "side-by-side" ||
                     previewMode === "original") && (
-                    <div className="flex w-full min-w-0 flex-1 flex-col items-center overflow-x-auto rounded-xl border border-slate-100 bg-slate-50/60 p-6">
+                    <ChartScrollViewport className="flex-1 rounded-xl border border-slate-100 bg-slate-50/60">
                       <PhysicalSizePreview
-                        matrix={pixelMatrix}
+                        matrix={displayMatrix!}
                         gridSize={gridSize}
                       />
-                    </div>
+                    </ChartScrollViewport>
                   )}
                 </div>
               ) : (
@@ -1343,15 +1448,17 @@ export default function BeadPatternGenerator() {
 
                   {(previewMode === "pattern" ||
                     previewMode === "side-by-side") && (
-                    <div className="flex w-full min-w-0 flex-1 flex-col items-center overflow-x-auto">
+                    <ChartScrollViewport className="flex-1">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
                         MARD Pattern ({gridSize}×{gridSize})
                       </p>
                       <PatternGrid
-                        matrix={pixelMatrix}
+                        matrix={displayMatrix!}
                         cellSize={cellDisplaySize}
+                        isFlippedH={isFlippedH}
+                        isFlippedV={isFlippedV}
                       />
-                    </div>
+                    </ChartScrollViewport>
                   )}
                 </div>
               )}
