@@ -40,6 +40,7 @@ type ColorFilterMode = "similar" | "category" | "hue";
 
 type BeadCell = { code: string; hex: string; empty?: boolean };
 type PixelMatrix = BeadCell[][];
+type BeadCoord = { x: number; y: number };
 type PreviewMode = "pattern" | "original" | "side-by-side";
 type PanelViewMode = "chart" | "size-preview";
 
@@ -197,6 +198,47 @@ function applyMatrixFlip(
 
 function getAxisLabel(index: number, size: number, flipped: boolean): number {
   return flipped ? size - index : index + 1;
+}
+
+function displayToStorageCoords(
+  displayX: number,
+  displayY: number,
+  gridSize: number,
+  flipH: boolean,
+  flipV: boolean
+): BeadCoord {
+  let x = displayX;
+  let y = displayY;
+  if (flipH) x = gridSize - 1 - x;
+  if (flipV) y = gridSize - 1 - y;
+  return { x, y };
+}
+
+function setBeadAtDisplayCoord(
+  matrix: PixelMatrix,
+  displayX: number,
+  displayY: number,
+  code: string,
+  gridSize: number,
+  flipH: boolean,
+  flipV: boolean
+): PixelMatrix {
+  const { x, y } = displayToStorageCoords(
+    displayX,
+    displayY,
+    gridSize,
+    flipH,
+    flipV
+  );
+  const hex = getMardHex(code);
+  if (!hex) return matrix;
+
+  return matrix.map((row, rowIdx) =>
+    (row ?? []).map((cell, colIdx) => {
+      if (rowIdx !== y || colIdx !== x) return normalizeBeadCell(cell);
+      return { code, hex, empty: false };
+    })
+  );
 }
 
 function pixelateImage(image: HTMLImageElement, gridSize: number): PixelMatrix {
@@ -774,9 +816,19 @@ function DimensionBracketHorizontal({
 function SizePreviewBeadCell({
   cell,
   cellSize,
+  col,
+  row,
+  isSelected,
+  hasSelection,
+  onSelect,
 }: {
   cell: BeadCell;
   cellSize: number;
+  col: number;
+  row: number;
+  isSelected: boolean;
+  hasSelection: boolean;
+  onSelect: (x: number, y: number) => void;
 }) {
   const beadStyle = {
     width: cellSize,
@@ -785,18 +837,30 @@ function SizePreviewBeadCell({
     minHeight: cellSize,
   };
 
+  const selectionClass = isSelected
+    ? "z-10 scale-105 ring-2 ring-amber-500 shadow-lg shadow-amber-500/30"
+    : hasSelection
+      ? "opacity-70 hover:opacity-100"
+      : "hover:brightness-110";
+
   if (cell.empty || !cell.code) {
     return (
-      <div
-        className="block aspect-square shrink-0 rounded-[6px]"
+      <button
+        type="button"
+        aria-pressed={isSelected}
+        onClick={() => onSelect(col, row)}
+        className={`block aspect-square shrink-0 cursor-pointer rounded-[6px] transition-all duration-150 ${selectionClass}`}
         style={beadStyle}
       />
     );
   }
 
   return (
-    <div
-      className="block aspect-square shrink-0 rounded-[6px] shadow-[inset_0_-1px_2px_rgba(0,0,0,0.12),0_0.5px_1px_rgba(255,255,255,0.35)]"
+    <button
+      type="button"
+      aria-pressed={isSelected}
+      onClick={() => onSelect(col, row)}
+      className={`block aspect-square shrink-0 cursor-pointer rounded-[6px] shadow-[inset_0_-1px_2px_rgba(0,0,0,0.12),0_0.5px_1px_rgba(255,255,255,0.35)] transition-all duration-150 ${selectionClass}`}
       style={{
         ...beadStyle,
         backgroundColor: cell.hex,
@@ -809,10 +873,14 @@ function PhysicalSizePreview({
   matrix,
   gridSize,
   t,
+  selectedBead,
+  onBeadSelect,
 }: {
   matrix: PixelMatrix;
   gridSize: number;
   t: Translations;
+  selectedBead: BeadCoord | null;
+  onBeadSelect: (x: number, y: number) => void;
 }) {
   if (!matrix?.length) return null;
 
@@ -821,6 +889,7 @@ function PhysicalSizePreview({
   const cmLabel = `${formatPhysicalCm(gridSize)} cm`;
   const cmWide = formatPhysicalCm(gridSize);
   const cmHigh = formatPhysicalCm(gridSize);
+  const hasSelection = selectedBead !== null;
 
   return (
     <div className="w-max min-w-min">
@@ -862,6 +931,13 @@ function PhysicalSizePreview({
                     key={`${rowIdx}-${colIdx}`}
                     cell={normalizeBeadCell(rawCell)}
                     cellSize={cellSize}
+                    col={colIdx}
+                    row={rowIdx}
+                    isSelected={
+                      selectedBead?.x === colIdx && selectedBead?.y === rowIdx
+                    }
+                    hasSelection={hasSelection}
+                    onSelect={onBeadSelect}
                   />
                 ))
               )}
@@ -880,11 +956,15 @@ function PatternGrid({
   cellSize,
   isFlippedH = false,
   isFlippedV = false,
+  selectedBead,
+  onBeadSelect,
 }: {
   matrix: PixelMatrix;
   cellSize: number;
   isFlippedH?: boolean;
   isFlippedV?: boolean;
+  selectedBead: BeadCoord | null;
+  onBeadSelect: (x: number, y: number) => void;
 }) {
   if (!matrix?.length) return null;
 
@@ -892,6 +972,7 @@ function PatternGrid({
   const labelWidth = 24;
   const patternWidth = gridSize * cellSize;
   const totalWidth = patternWidth + labelWidth * 2;
+  const hasSelection = selectedBead !== null;
 
   return (
     <div className="inline-block w-max min-w-min select-none" style={{ width: totalWidth }}>
@@ -931,11 +1012,22 @@ function PatternGrid({
               const isThickBottom = (rowIdx + 1) % 5 === 0;
               const isLastCol = colIdx === gridSize - 1;
               const isLastRow = rowIdx === gridSize - 1;
+              const isSelected =
+                selectedBead?.x === colIdx && selectedBead?.y === rowIdx;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={`${rowIdx}-${colIdx}`}
-                  className="absolute flex items-center justify-center"
+                  aria-pressed={isSelected}
+                  onClick={() => onBeadSelect(colIdx, rowIdx)}
+                  className={`absolute flex cursor-pointer items-center justify-center transition-all duration-150 ${
+                    isSelected
+                      ? "z-10 scale-105 ring-2 ring-amber-500 shadow-lg shadow-amber-500/30"
+                      : hasSelection
+                        ? "opacity-70 hover:opacity-100"
+                        : "hover:brightness-110"
+                  }`}
                   style={{
                     left: colIdx * cellSize,
                     top: rowIdx * cellSize,
@@ -956,6 +1048,7 @@ function PatternGrid({
                     fontWeight: 700,
                     fontFamily: "monospace",
                     lineHeight: 1,
+                    zIndex: isSelected ? 10 : undefined,
                   }}
                 >
                   <span
@@ -970,7 +1063,7 @@ function PatternGrid({
                   >
                     {!cell.empty && cell.code ? cell.code : ""}
                   </span>
-                </div>
+                </button>
               );
             })
           )}
@@ -1030,6 +1123,7 @@ export default function BeadPatternGenerator() {
     null
   );
   const [lang, setLang] = useState<Lang>("zh");
+  const [selectedBead, setSelectedBead] = useState<BeadCoord | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const t = useMemo(() => getTranslations(lang), [lang]);
@@ -1085,21 +1179,57 @@ export default function BeadPatternGenerator() {
     return getSimilarColors(activeColorId, 6);
   }, [activeColorId, colorFilterMode, activeCategory, hueValue]);
 
-  const handleBadgeClick = useCallback((code: string) => {
-    setActiveColorId((prev) => (prev === code ? null : code));
-    setColorFilterMode("similar");
-    setActiveCategory(null);
+  const handleBeadSelect = useCallback((x: number, y: number) => {
+    setSelectedBead((prev) =>
+      prev && prev.x === x && prev.y === y ? null : { x, y }
+    );
   }, []);
+
+  const injectColorAtSelectedBead = useCallback(
+    (code: string) => {
+      if (!pixelMatrix || !selectedBead || !getMardHex(code)) return;
+      setPixelMatrix(
+        setBeadAtDisplayCoord(
+          pixelMatrix,
+          selectedBead.x,
+          selectedBead.y,
+          code,
+          gridSize,
+          isFlippedH,
+          isFlippedV
+        )
+      );
+      setSelectedBead(null);
+    },
+    [pixelMatrix, selectedBead, gridSize, isFlippedH, isFlippedV]
+  );
+
+  const handleBadgeClick = useCallback(
+    (code: string) => {
+      if (selectedBead) {
+        injectColorAtSelectedBead(code);
+        return;
+      }
+      setActiveColorId((prev) => (prev === code ? null : code));
+      setColorFilterMode("similar");
+      setActiveCategory(null);
+    },
+    [selectedBead, injectColorAtSelectedBead]
+  );
 
   const handleColorSwap = useCallback(
     (fromCode: string, toCode: string) => {
+      if (selectedBead) {
+        injectColorAtSelectedBead(toCode);
+        return;
+      }
       if (!pixelMatrix || fromCode === toCode) return;
       setPixelMatrix(swapColorInMatrix(pixelMatrix, fromCode, toCode));
       setActiveColorId(toCode);
       setColorFilterMode("similar");
       setActiveCategory(null);
     },
-    [pixelMatrix]
+    [selectedBead, injectColorAtSelectedBead, pixelMatrix]
   );
 
   const handleCategorySelect = useCallback((category: UiColorFilter) => {
@@ -1122,6 +1252,7 @@ export default function BeadPatternGenerator() {
     setActiveColorId(null);
     setColorFilterMode("similar");
     setActiveCategory(null);
+    setSelectedBead(null);
   }, []);
 
   const loadImage = useCallback(
@@ -1221,6 +1352,10 @@ export default function BeadPatternGenerator() {
       }
     }
   }, [gridSize, hasGenerated, imageElement, resetSwapState]);
+
+  useEffect(() => {
+    setSelectedBead(null);
+  }, [isFlippedH, isFlippedV]);
 
   useEffect(() => {
     if (activeColorId && !beadCounts[activeColorId]) {
@@ -1507,6 +1642,8 @@ export default function BeadPatternGenerator() {
                         matrix={displayMatrix!}
                         gridSize={gridSize}
                         t={t}
+                        selectedBead={selectedBead}
+                        onBeadSelect={handleBeadSelect}
                       />
                     </ChartScrollViewport>
                   )}
@@ -1535,6 +1672,8 @@ export default function BeadPatternGenerator() {
                         cellSize={cellDisplaySize}
                         isFlippedH={isFlippedH}
                         isFlippedV={isFlippedV}
+                        selectedBead={selectedBead}
+                        onBeadSelect={handleBeadSelect}
                       />
                     </ChartScrollViewport>
                   )}
