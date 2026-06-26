@@ -19,6 +19,14 @@ import {
   X,
 } from "lucide-react";
 import {
+  getTranslations,
+  getUiCategoryLabel,
+  readStoredLang,
+  storeLang,
+  type Lang,
+  type Translations,
+} from "@/lib/i18n";
+import {
   MARD_RGB_CACHE,
   UI_CATEGORY_LABELS,
   getIdsForUiFilter,
@@ -323,14 +331,17 @@ function canvasToPngFile(
   });
 }
 
-async function sharePatternImage(file: File): Promise<"shared" | "unsupported" | "cancelled"> {
+async function sharePatternImage(
+  file: File,
+  title: string
+): Promise<"shared" | "unsupported" | "cancelled"> {
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") {
     return "unsupported";
   }
 
   const shareData: ShareData = {
     files: [file],
-    title: "MARD BEAN POCKET Pattern",
+    title,
   };
 
   try {
@@ -347,12 +358,51 @@ async function sharePatternImage(file: File): Promise<"shared" | "unsupported" |
   }
 }
 
+function LanguageSwitcher({
+  lang,
+  onChange,
+}: {
+  lang: Lang;
+  onChange: (lang: Lang) => void;
+}) {
+  return (
+    <div
+      className="flex shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-1 shadow-sm"
+      role="group"
+      aria-label="Language"
+    >
+      {(
+        [
+          ["zh", "中文"],
+          ["en", "EN"],
+        ] as const
+      ).map(([code, label]) => (
+        <button
+          key={code}
+          type="button"
+          onClick={() => onChange(code)}
+          className={`rounded-md px-3 py-1.5 text-xs font-bold tracking-wide transition-all ${
+            lang === code
+              ? "bg-white text-amber-600 shadow-sm ring-1 ring-amber-200/80"
+              : "text-slate-500 hover:bg-white/60 hover:text-amber-600"
+          }`}
+          aria-pressed={lang === code}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function MobileSavePatternModal({
   imageSrc,
   onClose,
+  t,
 }: {
   imageSrc: string;
   onClose: () => void;
+  t: Translations;
 }) {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -373,7 +423,7 @@ function MobileSavePatternModal({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="Save MARD BEAN POCKET pattern"
+      aria-label={t.mobileSaveAria}
     >
       <div
         className="relative flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl"
@@ -384,15 +434,15 @@ function MobileSavePatternModal({
           onClick={onClose}
           className="absolute right-3 top-3 z-10 rounded-lg px-2 py-1 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-700"
         >
-          关闭
+          {t.mobileClose}
         </button>
 
         <div className="border-b border-slate-100 px-4 pb-3 pt-5">
           <p className="text-center text-sm font-bold tracking-wide text-slate-800">
-            MARD BEAN POCKET
+            {t.appTitle}
           </p>
           <p className="mt-0.5 text-center text-xs text-slate-500">
-            拼豆教程生成器
+            {t.appSubtitle}
           </p>
         </div>
 
@@ -400,14 +450,14 @@ function MobileSavePatternModal({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={imageSrc}
-            alt="MARD bead pattern chart"
+            alt={t.patternChartAlt}
             className="mx-auto block max-w-full rounded-lg border border-slate-200 bg-white shadow-sm"
             style={{ imageRendering: "pixelated" }}
           />
         </div>
 
         <p className="border-t border-slate-100 px-4 py-4 text-center text-sm leading-relaxed text-slate-600">
-          💡 提示：长按图片选择「保存到相册」即可开始制作！
+          {t.mobileSaveTip}
         </p>
       </div>
     </div>
@@ -435,11 +485,13 @@ function ChartScrollViewport({
 function ColorSwatchButton({
   code,
   onClick,
+  swapLabel,
   size = "md",
   showLabel = true,
 }: {
   code: string;
   onClick: () => void;
+  swapLabel: (code: string) => string;
   size?: "sm" | "md" | "lg";
   showLabel?: boolean;
 }) {
@@ -453,7 +505,7 @@ function ColorSwatchButton({
     <button
       type="button"
       onClick={onClick}
-      title={`Swap to ${code}`}
+      title={swapLabel(code)}
       className="group flex flex-col items-center gap-1 rounded-lg p-1 transition-transform hover:scale-105"
     >
       <span
@@ -473,6 +525,8 @@ function ColorSubstitutionPanel({
   filterMode,
   activeCategory,
   hueValue,
+  lang,
+  t,
   onSwap,
   onCategorySelect,
   onHueChange,
@@ -484,6 +538,8 @@ function ColorSubstitutionPanel({
   filterMode: ColorFilterMode;
   activeCategory: UiColorFilter | null;
   hueValue: number;
+  lang: Lang;
+  t: Translations;
   onSwap: (from: string, to: string) => void;
   onCategorySelect: (category: UiColorFilter) => void;
   onHueChange: (hue: number) => void;
@@ -502,12 +558,10 @@ function ColorSubstitutionPanel({
           />
           <div>
             <p className="text-sm font-bold text-stone-800">
-              Color Substitution Panel
+              {t.colorSubstitutionPanel}
             </p>
             <p className="text-xs text-stone-500">
-              Replacing{" "}
-              <span className="font-semibold text-amber-700">{activeCode}</span>{" "}
-              across the entire pattern
+              {t.replacingColor(activeCode)}
             </p>
           </div>
         </div>
@@ -515,7 +569,7 @@ function ColorSubstitutionPanel({
           type="button"
           onClick={onClose}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-lg leading-none text-stone-400 transition-colors hover:bg-stone-100 hover:text-stone-600"
-          aria-label="Close substitution panel"
+          aria-label={t.closePanel}
         >
           ×
         </button>
@@ -525,15 +579,15 @@ function ColorSubstitutionPanel({
         <div>
           <div className="mb-3 flex items-center justify-between">
             <p className="text-xs font-bold uppercase tracking-wide text-stone-600">
-              相近色推荐
+              {t.similarColors}
               {filterMode === "category" && activeCategory && (
                 <span className="ml-2 normal-case text-amber-600">
-                  — {UI_CATEGORY_LABELS.find((c) => c.id === activeCategory)?.label}
+                  — {getUiCategoryLabel(lang, activeCategory)}
                 </span>
               )}
               {filterMode === "hue" && (
                 <span className="ml-2 normal-case text-amber-600">
-                  — Hue {Math.round(hueValue)}°
+                  — {t.hueAt(hueValue)}
                 </span>
               )}
             </p>
@@ -543,7 +597,7 @@ function ColorSubstitutionPanel({
                 onClick={onResetFilter}
                 className="text-xs font-medium text-amber-600 hover:text-amber-700"
               >
-                Reset to similar
+                {t.resetToSimilar}
               </button>
             )}
           </div>
@@ -555,24 +609,25 @@ function ColorSubstitutionPanel({
                   key={code}
                   code={code}
                   size="lg"
+                  swapLabel={t.swapTo}
                   onClick={() => onSwap(activeCode, code)}
                 />
               ))}
             </div>
           ) : (
             <p className="rounded-lg border border-dashed border-stone-200 bg-white/60 px-4 py-6 text-center text-sm text-stone-400">
-              No MARD colors found in this range. Try another category or hue.
+              {t.noColorsInRange}
             </p>
           )}
         </div>
 
         <div className="rounded-lg border border-stone-200 bg-white/70 p-4">
           <p className="mb-3 text-xs font-bold uppercase tracking-wide text-stone-600">
-            跨色域颜色滚轮
+            {t.crossPaletteWheel}
           </p>
 
           <div className="mb-4 flex flex-wrap gap-2">
-            {UI_CATEGORY_LABELS.map(({ id, label }) => (
+            {UI_CATEGORY_LABELS.map(({ id }) => (
               <button
                 key={id}
                 type="button"
@@ -583,7 +638,7 @@ function ColorSubstitutionPanel({
                     : "bg-stone-100 text-stone-600 hover:bg-stone-200"
                 }`}
               >
-                {label}
+                {getUiCategoryLabel(lang, id)}
               </button>
             ))}
           </div>
@@ -593,7 +648,7 @@ function ColorSubstitutionPanel({
               htmlFor="hue-slider"
               className="mb-2 block text-xs font-medium text-stone-500"
             >
-              Color Hue Slider
+              {t.colorHueSlider}
             </label>
             <input
               id="hue-slider"
@@ -610,12 +665,12 @@ function ColorSubstitutionPanel({
               }}
             />
             <div className="mt-1 flex justify-between text-[10px] text-stone-400">
-              <span>Red</span>
-              <span>Yellow</span>
-              <span>Green</span>
-              <span>Cyan</span>
-              <span>Blue</span>
-              <span>Magenta</span>
+              <span>{t.hueRed}</span>
+              <span>{t.hueYellow}</span>
+              <span>{t.hueGreen}</span>
+              <span>{t.hueCyan}</span>
+              <span>{t.hueBlue}</span>
+              <span>{t.hueMagenta}</span>
             </div>
           </div>
         </div>
@@ -624,17 +679,23 @@ function ColorSubstitutionPanel({
   );
 }
 
-function OriginalPreviewCard({ imageSrc }: { imageSrc: string }) {
+function OriginalPreviewCard({
+  imageSrc,
+  t,
+}: {
+  imageSrc: string;
+  t: Translations;
+}) {
   return (
     <div className="mx-auto w-full max-w-[220px]">
       <p className="mb-2 text-center text-xs font-medium uppercase tracking-wide text-slate-400">
-        Original
+        {t.original}
       </p>
       <div className="w-full overflow-hidden rounded-lg border border-slate-200 bg-[repeating-conic-gradient(#e2e8f0_0%_25%,#fff_0%_50%)] bg-[length:12px_12px] p-3">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={imageSrc}
-          alt="Original"
+          alt={t.original}
           className="mx-auto block w-full max-w-full object-contain"
           style={{ imageRendering: "pixelated" }}
         />
@@ -747,9 +808,11 @@ function SizePreviewBeadCell({
 function PhysicalSizePreview({
   matrix,
   gridSize,
+  t,
 }: {
   matrix: PixelMatrix;
   gridSize: number;
+  t: Translations;
 }) {
   if (!matrix?.length) return null;
 
@@ -762,12 +825,12 @@ function PhysicalSizePreview({
   return (
     <div className="w-max min-w-min">
       <p className="mb-5 text-center text-sm font-bold text-slate-800">
-        Estimated Finished Size:{" "}
+        {t.estimatedFinishedSize}{" "}
         <span className="text-amber-700">
-          {cmWide} cm wide × {cmHigh} cm high
+          {t.finishedSizeWideHigh(cmWide, cmHigh)}
         </span>
         <span className="mt-0.5 block text-xs font-normal text-slate-500">
-          Based on standard {BEAD_DIAMETER_MM}mm fuse beads
+          {t.basedOnStandardBeads(BEAD_DIAMETER_MM)}
         </span>
       </p>
 
@@ -966,8 +1029,19 @@ export default function BeadPatternGenerator() {
   const [mobileSaveModalSrc, setMobileSaveModalSrc] = useState<string | null>(
     null
   );
+  const [lang, setLang] = useState<Lang>("zh");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const t = useMemo(() => getTranslations(lang), [lang]);
+
+  useEffect(() => {
+    setLang(readStoredLang());
+  }, []);
+
+  useEffect(() => {
+    storeLang(lang);
+    document.title = getTranslations(lang).pageTitle;
+  }, [lang]);
 
   const displayMatrix = useMemo(
     () =>
@@ -1125,14 +1199,14 @@ export default function BeadPatternGenerator() {
 
     try {
       const file = await canvasToPngFile(canvas, filename);
-      const shareResult = await sharePatternImage(file);
+      const shareResult = await sharePatternImage(file, t.sharePatternTitle);
       if (shareResult === "shared" || shareResult === "cancelled") return;
     } catch (error) {
       console.warn("Mobile share unavailable, opening save modal:", error);
     }
 
     setMobileSaveModalSrc(canvas.toDataURL("image/png"));
-  }, [displayMatrix, gridSize, isFlippedH, isFlippedV]);
+  }, [displayMatrix, gridSize, isFlippedH, isFlippedV, t.sharePatternTitle]);
 
   useEffect(() => {
     if (hasGenerated && imageElement) {
@@ -1170,16 +1244,19 @@ export default function BeadPatternGenerator() {
   return (
     <div className="dashboard-bg min-h-screen">
       <header className="pixel-bg border-b border-slate-200 bg-white/90 backdrop-blur-sm">
-        <div className="mx-auto flex max-w-7xl items-center gap-3 px-4 py-5 sm:px-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500 shadow-sm">
-            <Grid3X3 className="h-5 w-5 text-white" />
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-5 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500 shadow-sm">
+              <Grid3X3 className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+                {t.appTitle}
+              </h1>
+              <p className="text-sm text-slate-500">{t.appSubtitle}</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-              MARD BEAN POCKET
-            </h1>
-            <p className="text-sm text-slate-500">拼豆教程生成器</p>
-          </div>
+          <LanguageSwitcher lang={lang} onChange={setLang} />
         </div>
       </header>
 
@@ -1189,7 +1266,7 @@ export default function BeadPatternGenerator() {
             <div className="sticky top-6 space-y-5 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
               <div>
                 <label className="mb-2 block text-sm font-semibold text-stone-700">
-                  Upload Image
+                  {t.uploadImage}
                 </label>
                 <div
                   role="button"
@@ -1212,7 +1289,7 @@ export default function BeadPatternGenerator() {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={imageSrc}
-                        alt="Uploaded preview"
+                        alt={t.uploadedPreviewAlt}
                         className="mx-auto max-h-36 rounded-lg object-contain"
                       />
                       <button
@@ -1222,7 +1299,7 @@ export default function BeadPatternGenerator() {
                           clearImage();
                         }}
                         className="absolute -right-2 -top-2 rounded-full bg-stone-800 p-1 text-white shadow hover:bg-stone-700"
-                        aria-label="Remove image"
+                        aria-label={t.removeImage}
                       >
                         <X className="h-3.5 w-3.5" />
                       </button>
@@ -1231,10 +1308,10 @@ export default function BeadPatternGenerator() {
                     <>
                       <Upload className="mb-2 h-8 w-8 text-stone-400" />
                       <p className="text-sm font-medium text-stone-600">
-                        Drag & drop or click to upload
+                        {t.dragDropUpload}
                       </p>
                       <p className="mt-1 text-xs text-stone-400">
-                        PNG, JPG, GIF supported
+                        {t.fileTypesSupported}
                       </p>
                     </>
                   )}
@@ -1253,7 +1330,7 @@ export default function BeadPatternGenerator() {
                   htmlFor="grid-size"
                   className="mb-2 block text-sm font-semibold text-stone-700"
                 >
-                  Grid Size
+                  {t.gridSize}
                 </label>
                 <select
                   id="grid-size"
@@ -1277,20 +1354,20 @@ export default function BeadPatternGenerator() {
                   className="mt-3 w-full accent-amber-500"
                 />
                 <p className="mt-1 text-center text-xs text-stone-400">
-                  Custom: {gridSize} × {gridSize}
+                  {t.customGridSize(gridSize)}
                 </p>
               </div>
 
               <div>
                 <label className="mb-2 block text-sm font-semibold text-stone-700">
-                  Preview Mode
+                  {t.previewMode}
                 </label>
                 <div className="flex rounded-lg border border-stone-200 bg-stone-50 p-1">
                   {(
                     [
-                      ["side-by-side", "Both"],
-                      ["pattern", "Pattern"],
-                      ["original", "Original"],
+                      ["side-by-side", t.previewBoth],
+                      ["pattern", t.previewPattern],
+                      ["original", t.previewOriginal],
                     ] as const
                   ).map(([mode, label]) => (
                     <button
@@ -1311,7 +1388,7 @@ export default function BeadPatternGenerator() {
 
               <div>
                 <label className="mb-2 block text-sm font-semibold text-stone-700">
-                  Matrix Flip
+                  {t.matrixFlip}
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   <button
@@ -1324,7 +1401,7 @@ export default function BeadPatternGenerator() {
                         : "border-stone-200 bg-stone-50 text-stone-600 hover:border-amber-300 hover:bg-amber-50/60"
                     }`}
                   >
-                    ↔️ 左右反转
+                    {t.flipHorizontal}
                   </button>
                   <button
                     type="button"
@@ -1336,7 +1413,7 @@ export default function BeadPatternGenerator() {
                         : "border-stone-200 bg-stone-50 text-stone-600 hover:border-amber-300 hover:bg-amber-50/60"
                     }`}
                   >
-                    ↕️ 上下反转
+                    {t.flipVertical}
                   </button>
                 </div>
               </div>
@@ -1349,7 +1426,7 @@ export default function BeadPatternGenerator() {
                   className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Sparkles className="h-4 w-4" />
-                  Generate Pattern
+                  {t.generatePattern}
                 </button>
                 <button
                   type="button"
@@ -1358,7 +1435,7 @@ export default function BeadPatternGenerator() {
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-stone-300 bg-white px-4 py-3 text-sm font-semibold text-stone-700 shadow-sm transition-colors hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Download className="h-4 w-4" />
-                  Download Pattern (PNG)
+                  {t.downloadPattern}
                 </button>
               </div>
             </div>
@@ -1369,14 +1446,14 @@ export default function BeadPatternGenerator() {
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-700">
                   <ImageIcon className="h-4 w-4" />
-                  Pattern Preview
+                  {t.patternPreview}
                 </h2>
                 {pixelMatrix && (
                   <div className="flex rounded-lg border border-slate-200 bg-slate-50 p-1">
                     {(
                       [
-                        ["chart", "🧵 Pattern Chart"],
-                        ["size-preview", "📏 Size Preview"],
+                        ["chart", t.tabPatternChart],
+                        ["size-preview", t.tabSizePreview],
                       ] as const
                     ).map(([mode, label]) => (
                       <button
@@ -1399,13 +1476,13 @@ export default function BeadPatternGenerator() {
               {!imageElement ? (
                 <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
                   <p className="text-sm text-slate-400">
-                    Upload an image to get started
+                    {t.uploadToStart}
                   </p>
                 </div>
               ) : !pixelMatrix ? (
                 <div className="flex h-64 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50">
                   <p className="text-sm text-slate-400">
-                    Click &quot;Generate Pattern&quot; to create your bead chart
+                    {t.generateToStart}
                   </p>
                 </div>
               ) : panelViewMode === "size-preview" ? (
@@ -1419,7 +1496,7 @@ export default function BeadPatternGenerator() {
                 >
                   {(previewMode === "original" ||
                     previewMode === "side-by-side") && (
-                    <OriginalPreviewCard imageSrc={imageSrc!} />
+                    <OriginalPreviewCard imageSrc={imageSrc!} t={t} />
                   )}
 
                   {(previewMode === "pattern" ||
@@ -1429,6 +1506,7 @@ export default function BeadPatternGenerator() {
                       <PhysicalSizePreview
                         matrix={displayMatrix!}
                         gridSize={gridSize}
+                        t={t}
                       />
                     </ChartScrollViewport>
                   )}
@@ -1443,14 +1521,14 @@ export default function BeadPatternGenerator() {
                 >
                   {(previewMode === "original" ||
                     previewMode === "side-by-side") && (
-                    <OriginalPreviewCard imageSrc={imageSrc!} />
+                    <OriginalPreviewCard imageSrc={imageSrc!} t={t} />
                   )}
 
                   {(previewMode === "pattern" ||
                     previewMode === "side-by-side") && (
                     <ChartScrollViewport className="flex-1">
                       <p className="mb-2 text-xs font-medium uppercase tracking-wide text-stone-400">
-                        MARD Pattern ({gridSize}×{gridSize})
+                        {t.mardPattern(gridSize)}
                       </p>
                       <PatternGrid
                         matrix={displayMatrix!}
@@ -1475,10 +1553,10 @@ export default function BeadPatternGenerator() {
                     }}
                     aria-hidden
                   />
-                  Required Beads List
+                  {t.requiredBeadsList}
                 </h2>
                 <p className="mb-4 text-xs text-stone-500">
-                  Click a color to open the substitution panel
+                  {t.clickColorForSubstitution}
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {sortedBeadCounts.map(([code, count]) => {
@@ -1514,6 +1592,8 @@ export default function BeadPatternGenerator() {
                     filterMode={colorFilterMode}
                     activeCategory={activeCategory}
                     hueValue={hueValue}
+                    lang={lang}
+                    t={t}
                     onSwap={handleColorSwap}
                     onCategorySelect={handleCategorySelect}
                     onHueChange={handleHueChange}
@@ -1526,7 +1606,7 @@ export default function BeadPatternGenerator() {
                 )}
 
                 <p className="mt-5 border-t border-stone-200 pt-4 text-base font-bold text-stone-900">
-                  Total Beads Required: {totalBeads}
+                  {t.totalBeadsRequired(totalBeads)}
                 </p>
               </div>
             )}
@@ -1538,6 +1618,7 @@ export default function BeadPatternGenerator() {
         <MobileSavePatternModal
           imageSrc={mobileSaveModalSrc}
           onClose={() => setMobileSaveModalSrc(null)}
+          t={t}
         />
       )}
     </div>
