@@ -8,6 +8,8 @@ import {
   useState,
   type ChangeEvent,
   type DragEvent,
+  type MouseEvent,
+  type TouchEvent,
   type ReactNode,
 } from "react";
 import {
@@ -48,6 +50,61 @@ const BEAD_DIAMETER_MM = 5;
 const GRID_SIZE_OPTIONS = [16, 29, 32, 50, 64] as const;
 const EMPTY_CELL_HEX = "#FFFFFF";
 const DEFAULT_BEAD: MardRgbEntry = MARD_RGB_CACHE.find((c) => c.id === "H1") ?? MARD_RGB_CACHE[0];
+
+const BEAD_CELL_INTERACTIVE_CLASS =
+  "pointer-events-auto cursor-pointer touch-manipulation [touch-action:manipulation] transition-all duration-150";
+
+let lastBeadTouchAt = 0;
+
+function handleTouchOrClick(
+  event: MouseEvent | TouchEvent,
+  x: number,
+  y: number,
+  onBeadClick: (x: number, y: number) => void
+): void {
+  event.stopPropagation();
+
+  if (event.type === "touchend") {
+    event.preventDefault();
+    lastBeadTouchAt = Date.now();
+    onBeadClick(x, y);
+    return;
+  }
+
+  // Skip ghost click emulated after touchend on mobile browsers
+  if (Date.now() - lastBeadTouchAt < 400) return;
+
+  onBeadClick(x, y);
+}
+
+function getBeadCellInteractionProps(
+  x: number,
+  y: number,
+  onBeadClick: (x: number, y: number) => void
+) {
+  return {
+    onClick: (event: MouseEvent) =>
+      handleTouchOrClick(event, x, y, onBeadClick),
+    onTouchEnd: (event: TouchEvent) =>
+      handleTouchOrClick(event, x, y, onBeadClick),
+  };
+}
+
+const BEAD_CELL_TOUCH_STYLE = { touchAction: "manipulation" as const };
+
+const BEAD_CELL_SELECTED_CLASS =
+  "relative z-30 !ring-4 !ring-amber-500 scale-110 shadow-xl";
+const BEAD_CELL_SELECTED_SHADOW =
+  "0 0 0 4px rgb(245 158 11), 0 10px 15px -3px rgb(245 158 11 / 0.35)";
+
+function getBeadCellSelectionClass(
+  isSelected: boolean,
+  hasSelection: boolean
+): string {
+  if (isSelected) return BEAD_CELL_SELECTED_CLASS;
+  if (hasSelection) return "opacity-70 hover:opacity-100";
+  return "hover:brightness-110";
+}
 
 function colorDistanceSq(
   r1: number, g1: number, b1: number,
@@ -233,12 +290,12 @@ function setBeadAtDisplayCoord(
   const hex = getMardHex(code);
   if (!hex) return matrix;
 
-  return matrix.map((row, rowIdx) =>
-    (row ?? []).map((cell, colIdx) => {
-      if (rowIdx !== y || colIdx !== x) return normalizeBeadCell(cell);
-      return { code, hex, empty: false };
-    })
-  );
+  const newMatrix = matrix.map((row) => [...(row ?? [])]);
+  const targetRow = newMatrix[y];
+  if (!targetRow) return matrix;
+
+  targetRow[x] = { code, hex, empty: false };
+  return newMatrix;
 }
 
 function pixelateImage(image: HTMLImageElement, gridSize: number): PixelMatrix {
@@ -820,7 +877,7 @@ function SizePreviewBeadCell({
   row,
   isSelected,
   hasSelection,
-  onSelect,
+  onBeadClick,
 }: {
   cell: BeadCell;
   cellSize: number;
@@ -828,39 +885,54 @@ function SizePreviewBeadCell({
   row: number;
   isSelected: boolean;
   hasSelection: boolean;
-  onSelect: (x: number, y: number) => void;
+  onBeadClick: (x: number, y: number) => void;
 }) {
   const beadStyle = {
     width: cellSize,
     height: cellSize,
     minWidth: cellSize,
     minHeight: cellSize,
+    zIndex: isSelected ? 30 : 1,
+    boxShadow: isSelected ? BEAD_CELL_SELECTED_SHADOW : undefined,
+    ...BEAD_CELL_TOUCH_STYLE,
   };
 
-  const selectionClass = isSelected
-    ? "z-10 scale-105 ring-2 ring-amber-500 shadow-lg shadow-amber-500/30"
-    : hasSelection
-      ? "opacity-70 hover:opacity-100"
-      : "hover:brightness-110";
+  const selectionClass = getBeadCellSelectionClass(isSelected, hasSelection);
+  const sharedClass = `${BEAD_CELL_INTERACTIVE_CLASS} ${selectionClass}`;
+  const interactionProps = getBeadCellInteractionProps(col, row, onBeadClick);
 
   if (cell.empty || !cell.code) {
     return (
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         aria-pressed={isSelected}
-        onClick={() => onSelect(col, row)}
-        className={`block aspect-square shrink-0 cursor-pointer rounded-[6px] transition-all duration-150 ${selectionClass}`}
+        {...interactionProps}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onBeadClick(col, row);
+          }
+        }}
+        className={`block aspect-square shrink-0 rounded-[6px] ${sharedClass}`}
         style={beadStyle}
       />
     );
   }
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       aria-pressed={isSelected}
-      onClick={() => onSelect(col, row)}
-      className={`block aspect-square shrink-0 cursor-pointer rounded-[6px] shadow-[inset_0_-1px_2px_rgba(0,0,0,0.12),0_0.5px_1px_rgba(255,255,255,0.35)] transition-all duration-150 ${selectionClass}`}
+      {...interactionProps}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onBeadClick(col, row);
+        }
+      }}
+      className={`block aspect-square shrink-0 rounded-[6px] shadow-[inset_0_-1px_2px_rgba(0,0,0,0.12),0_0.5px_1px_rgba(255,255,255,0.35)] ${sharedClass}`}
       style={{
         ...beadStyle,
         backgroundColor: cell.hex,
@@ -874,13 +946,13 @@ function PhysicalSizePreview({
   gridSize,
   t,
   selectedBead,
-  onBeadSelect,
+  onBeadClick,
 }: {
   matrix: PixelMatrix;
   gridSize: number;
   t: Translations;
   selectedBead: BeadCoord | null;
-  onBeadSelect: (x: number, y: number) => void;
+  onBeadClick: (x: number, y: number) => void;
 }) {
   if (!matrix?.length) return null;
 
@@ -908,7 +980,7 @@ function PhysicalSizePreview({
 
         <div className="flex flex-col items-center">
           <div
-            className="relative overflow-hidden rounded-sm shadow-md ring-1 ring-slate-200/80"
+            className="relative overflow-visible rounded-sm shadow-md ring-1 ring-slate-200/80"
             style={{
               width: plateSize,
               height: plateSize,
@@ -917,7 +989,7 @@ function PhysicalSizePreview({
             }}
           >
             <div
-              className="grid gap-0"
+              className="relative grid gap-0 overflow-visible"
               style={{
                 gridTemplateColumns: `repeat(${gridSize}, ${cellSize}px)`,
                 gridTemplateRows: `repeat(${gridSize}, ${cellSize}px)`,
@@ -937,7 +1009,7 @@ function PhysicalSizePreview({
                       selectedBead?.x === colIdx && selectedBead?.y === rowIdx
                     }
                     hasSelection={hasSelection}
-                    onSelect={onBeadSelect}
+                    onBeadClick={onBeadClick}
                   />
                 ))
               )}
@@ -957,14 +1029,14 @@ function PatternGrid({
   isFlippedH = false,
   isFlippedV = false,
   selectedBead,
-  onBeadSelect,
+  onBeadClick,
 }: {
   matrix: PixelMatrix;
   cellSize: number;
   isFlippedH?: boolean;
   isFlippedV?: boolean;
   selectedBead: BeadCoord | null;
-  onBeadSelect: (x: number, y: number) => void;
+  onBeadClick: (x: number, y: number) => void;
 }) {
   if (!matrix?.length) return null;
 
@@ -975,7 +1047,7 @@ function PatternGrid({
   const hasSelection = selectedBead !== null;
 
   return (
-    <div className="inline-block w-max min-w-min select-none" style={{ width: totalWidth }}>
+    <div className="inline-block w-max min-w-min" style={{ width: totalWidth }}>
       <div className="flex" style={{ marginLeft: labelWidth }}>
         {Array.from({ length: gridSize }, (_, col) => (
           <div
@@ -1002,7 +1074,7 @@ function PatternGrid({
         </div>
 
         <div
-          className="relative border-[3px] border-stone-700"
+          className="relative overflow-visible border-[3px] border-stone-700"
           style={{ width: patternWidth, height: patternWidth }}
         >
           {matrix.map((row, rowIdx) =>
@@ -1014,20 +1086,30 @@ function PatternGrid({
               const isLastRow = rowIdx === gridSize - 1;
               const isSelected =
                 selectedBead?.x === colIdx && selectedBead?.y === rowIdx;
+              const selectionClass = getBeadCellSelectionClass(
+                isSelected,
+                hasSelection
+              );
+              const interactionProps = getBeadCellInteractionProps(
+                colIdx,
+                rowIdx,
+                onBeadClick
+              );
 
               return (
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex={0}
                   key={`${rowIdx}-${colIdx}`}
                   aria-pressed={isSelected}
-                  onClick={() => onBeadSelect(colIdx, rowIdx)}
-                  className={`absolute flex cursor-pointer items-center justify-center transition-all duration-150 ${
-                    isSelected
-                      ? "z-10 scale-105 ring-2 ring-amber-500 shadow-lg shadow-amber-500/30"
-                      : hasSelection
-                        ? "opacity-70 hover:opacity-100"
-                        : "hover:brightness-110"
-                  }`}
+                  {...interactionProps}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      onBeadClick(colIdx, rowIdx);
+                    }
+                  }}
+                  className={`absolute flex items-center justify-center ${BEAD_CELL_INTERACTIVE_CLASS} ${selectionClass}`}
                   style={{
                     left: colIdx * cellSize,
                     top: rowIdx * cellSize,
@@ -1048,10 +1130,13 @@ function PatternGrid({
                     fontWeight: 700,
                     fontFamily: "monospace",
                     lineHeight: 1,
-                    zIndex: isSelected ? 10 : undefined,
+                    zIndex: isSelected ? 30 : 1,
+                    boxShadow: isSelected ? BEAD_CELL_SELECTED_SHADOW : undefined,
+                    ...BEAD_CELL_TOUCH_STYLE,
                   }}
                 >
                   <span
+                    className="pointer-events-none"
                     style={{
                       fontSize: Math.max(4, cellSize * 0.32),
                       overflow: "hidden",
@@ -1063,7 +1148,7 @@ function PatternGrid({
                   >
                     {!cell.empty && cell.code ? cell.code : ""}
                   </span>
-                </button>
+                </div>
               );
             })
           )}
@@ -1179,7 +1264,7 @@ export default function BeadPatternGenerator() {
     return getSimilarColors(activeColorId, 6);
   }, [activeColorId, colorFilterMode, activeCategory, hueValue]);
 
-  const handleBeadSelect = useCallback((x: number, y: number) => {
+  const handleBeadClick = useCallback((x: number, y: number) => {
     setSelectedBead((prev) =>
       prev && prev.x === x && prev.y === y ? null : { x, y }
     );
@@ -1643,7 +1728,7 @@ export default function BeadPatternGenerator() {
                         gridSize={gridSize}
                         t={t}
                         selectedBead={selectedBead}
-                        onBeadSelect={handleBeadSelect}
+                        onBeadClick={handleBeadClick}
                       />
                     </ChartScrollViewport>
                   )}
@@ -1673,7 +1758,7 @@ export default function BeadPatternGenerator() {
                         isFlippedH={isFlippedH}
                         isFlippedV={isFlippedV}
                         selectedBead={selectedBead}
-                        onBeadSelect={handleBeadSelect}
+                        onBeadClick={handleBeadClick}
                       />
                     </ChartScrollViewport>
                   )}
